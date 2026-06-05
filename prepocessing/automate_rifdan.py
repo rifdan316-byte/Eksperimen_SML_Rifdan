@@ -2,49 +2,66 @@ import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from imblearn.under_sampling import RandomUnderSampler
 
-def preprocess_data(raw_data_path, output_dir):
-    print("Memulai proses preprocessing data...")
+def load_data(file_path):
+    """Membaca data mentah dari path."""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File tidak ditemukan di: {file_path}")
+    return pd.read_csv(file_path)
+
+def preprocess_data(df):
+    """Menjalankan tahapan pembersihan data dan pemisahan fitur secara otomatis."""
+    # 1. Mengatasi data duplikat jika ada
+    df = df.drop_duplicates()
     
-    # 1. Load Dataset
-    if not os.path.exists(raw_data_path):
-        raise FileNotFoundError(f"File data mentah tidak ditemukan di: {raw_data_path}")
-        
-    df = pd.read_csv(raw_data_path)
+    # 2. Pisahkan Fitur (X) dan Target (y) sesuai nama kolom di dataset Anda
+    X = df.drop(columns=['Stress Level']) 
+    y = df['Stress Level']
     
-    # 2. Handling Missing Values (Sesuaikan dengan notebook eksperimen Anda)
-    # Contoh standar untuk dataset heart disease jika ada nulls
-    df = df.dropna()
-    
-    # 3. Pisahkan Fitur (X) dan Target (y)
-    # Asumsi kolom target bernama 'target' atau 'HeartDisease' (sesuaikan dengan dataset Anda)
-    target_column = 'target' if 'target' in df.columns else df.columns[-1]
-    X = df.drop(columns=[target_column])
-    y = df[target_column]
-    
-    # 4. Split Dataset (Train 80%, Test 20%)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    
-    # 5. Feature Scaling (Opsional, sesuaikan dengan kebutuhan eksperimen)
+    # 3. Lakukan Scaling pada Fitur Numerik
     scaler = StandardScaler()
-    X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns)
-    X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
+    X_scaled = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
     
-    # 6. Membuat direktori output jika belum ada
+    return X_scaled, y
+
+def handle_imbalanced_data(X_train, y_train):
+    """Melakukan Random Undersampling HANYA pada data training."""
+    print("Melakukan Random Undersampling pada data training...")
+    rus = RandomUnderSampler(random_state=42)
+    X_train_resampled, y_train_resampled = rus.fit_resample(X_train, y_train)
+    return X_train_resampled, y_train_resampled
+
+def save_preprocessed_data(X_train, X_test, y_train, y_test, output_dir):
+    """Menyimpan hasil data split dan resampled ke folder tujuan."""
     os.makedirs(output_dir, exist_ok=True)
     
-    # 7. Simpan hasil preprocessing ke file CSV
-    X_train_scaled.to_csv(os.path.join(output_dir, 'X_train.csv'), index=False)
-    X_test_scaled.to_csv(os.path.join(output_dir, 'X_test.csv'), index=False)
-    y_train.to_csv(os.path.join(output_dir, 'y_train.csv'), index=False)
-    y_test.to_csv(os.path.join(output_dir, 'y_test.csv'), index=False)
-    
-    print(f"Preprocessing selesai! File disimpan di direktori: {output_dir}")
+    X_train.to_csv(os.path.join(output_dir, "X_train_ready.csv"), index=False)
+    X_test.to_csv(os.path.join(output_dir, "X_test_ready.csv"), index=False)
+    y_train.to_csv(os.path.join(output_dir, "y_train_ready.csv"), index=False)
+    y_test.to_csv(os.path.join(output_dir, "y_test_ready.csv"), index=False)
+    print(f"Sukses! Seluruh data hasil preprocessing disimpan di: {output_dir}")
 
 if __name__ == "__main__":
-    # Menentukan path secara relatif terhadap root repositori kriteria 1
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    RAW_PATH = os.path.join(BASE_DIR, 'data_raw', 'heart_disease.csv')
-    OUTPUT_PATH = os.path.join(BASE_DIR, 'preprocessing', 'data_processed')
+    # Tentukan jalur file sesuai dengan struktur folder Eksperimen_SML_Rifdan Anda
+    RAW_DATA_PATH = "data_raw/student_stress_dataset.csv"  # Sesuaikan dengan nama file asli Anda
+    OUTPUT_DIR = "preprocessing/namadataset_preprocessing"
     
-    preprocess_data(RAW_PATH, OUTPUT_PATH)
+    print("=== Memulai Pipeline Otomatisasi Preprocessing ===")
+    
+    # 1. Load Data
+    raw_df = load_data(RAW_DATA_PATH)
+    
+    # 2. Preprocess & Scale Fitur
+    X, y = preprocess_data(raw_df)
+    
+    # 3. Split Dataset Terlebih Dahulu (Menghindari Data Leakage)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    
+    # 4. Handle Imbalanced Data HANYA pada Data Train
+    X_train_res, y_train_res = handle_imbalanced_data(X_train, y_train)
+    
+    # 5. Simpan Hasil Akhir yang Siap Dilatih ke Folder Target
+    save_preprocessed_data(X_train_res, X_test, y_train_res, y_test, OUTPUT_DIR)
+    
+    print("=== Pipeline Selesai Terbaca Tanpa Error ===")
