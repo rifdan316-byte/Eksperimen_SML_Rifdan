@@ -2,28 +2,42 @@ import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+import imblearn.under_sampling
 from imblearn.under_sampling import RandomUnderSampler
 
 def load_data(file_path):
-    """Membaca data mentah dari path."""
+    """Membaca data mentah dari path menggunakan absolute path atau relative path."""
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File tidak ditemukan di: {file_path}")
     return pd.read_csv(file_path)
 
-def preprocess_data(df):
-    """Menjalankan tahapan pembersihan data dan pemisahan fitur secara otomatis."""
-    # 1. Mengatasi data duplikat jika ada
+def preprocess_and_split(df):
+    """
+    Menjalankan pembersihan data, encoding, pemisahan fitur, 
+    dan melakukan split & scaling secara aman tanpa data leakage.
+    """
+    # 1. Mengatasi data duplikat
     df = df.drop_duplicates()
     
-    # 2. Pisahkan Fitur (X) dan Target (y) sesuai nama kolom di dataset Anda
-    X = df.drop(columns=['Stress Level']) 
-    y = df['Stress Level']
+    # 2. Lakukan One-Hot Encoding pada fitur kategorikal teks agar bisa di-scale
+    df_encoded = pd.get_dummies(df, columns=['Student_Type', 'Month'], drop_first=True)
     
-    # 3. Lakukan Scaling pada Fitur Numerik
+    # 3. Pisahkan Fitur (X) dan Target (y) berdasarkan nama kolom yang tepat
+    X = df_encoded.drop(columns=['Stress_Level']) 
+    y = df_encoded['Stress_Level']
+    
+    # 4. Split Dataset terlebih dahulu (Proporsi 80:20)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+    
+    # 5. Penskalaan (Scaling) Fitur secara terisolasi untuk mencegah leakage
     scaler = StandardScaler()
-    X_scaled = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
     
-    return X_scaled, y
+    # Fit & Transform hanya pada data training
+    X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns)
+    # Transform saja pada data testing menggunakan parameter dari data training
+    X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
+    
+    return X_train_scaled, X_test_scaled, y_train, y_test
 
 def handle_imbalanced_data(X_train, y_train):
     """Melakukan Random Undersampling HANYA pada data training."""
@@ -43,25 +57,22 @@ def save_preprocessed_data(X_train, X_test, y_train, y_test, output_dir):
     print(f"Sukses! Seluruh data hasil preprocessing disimpan di: {output_dir}")
 
 if __name__ == "__main__":
-    # Tentukan jalur file sesuai dengan struktur folder Eksperimen_SML_Rifdan Anda
-    RAW_DATA_PATH = "data_raw/student_stress_dataset.csv"  # Sesuaikan dengan nama file asli Anda
-    OUTPUT_DIR = "preprocessing/namadataset_preprocessing"
+    # Menggunakan Absolute Path agar aman dijalankan dari direktori terminal mana pun
+    RAW_DATA_PATH = r"C:\Users\LENOVO\Documents\MSML\Eksperimen_SML_Rifdan\data_raw\student-lifestyle-and-stress-dataset.csv"
+    OUTPUT_DIR = r"C:\Users\LENOVO\Documents\MSML\Eksperimen_SML_Rifdan\preprocessing\student_preprocessing"
     
     print("=== Memulai Pipeline Otomatisasi Preprocessing ===")
     
     # 1. Load Data
     raw_df = load_data(RAW_DATA_PATH)
     
-    # 2. Preprocess & Scale Fitur
-    X, y = preprocess_data(raw_df)
+    # 2. Preprocess, One-Hot Encode, Split, dan Scale (Aman dari Leakage & ValueError)
+    X_train, X_test, y_train, y_test = preprocess_and_split(raw_df)
     
-    # 3. Split Dataset Terlebih Dahulu (Menghindari Data Leakage)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    
-    # 4. Handle Imbalanced Data HANYA pada Data Train
+    # 3. Handle Imbalanced Data HANYA pada Data Train
     X_train_res, y_train_res = handle_imbalanced_data(X_train, y_train)
     
-    # 5. Simpan Hasil Akhir yang Siap Dilatih ke Folder Target
+    # 4. Simpan Hasil Akhir yang Siap Dilatih ke Folder Target
     save_preprocessed_data(X_train_res, X_test, y_train_res, y_test, OUTPUT_DIR)
     
     print("=== Pipeline Selesai Terbaca Tanpa Error ===")
