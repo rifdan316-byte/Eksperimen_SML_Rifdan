@@ -1,78 +1,139 @@
+"""
+Skrip Otomasi Pipeline Machine Learning (End-to-End)
+Proyek: Student Lifestyle and Stress Prediction
+Nama Mahasiswa: Rifdan
+Kriteria Dicoding: Proyek Akhir (Kriteria 3 - Automate Script)
+"""
+
 import os
+import pickle
+import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-import imblearn.under_sampling
 from imblearn.under_sampling import RandomUnderSampler
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 
-def load_data(file_path):
-    """Membaca data mentah dari path menggunakan absolute path atau relative path."""
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File tidak ditemukan di: {file_path}")
-    return pd.read_csv(file_path)
+def run_automation_pipeline():
+    print("="*60)
+    print("STARTING MACHINE LEARNING AUTOMATION PIPELINE - RIFDAN")
+    print("="*60)
 
-def preprocess_and_split(df):
-    """
-    Menjalankan pembersihan data, encoding, pemisahan fitur, 
-    dan melakukan split & scaling secara aman tanpa data leakage.
-    """
-    # 1. Mengatasi data duplikat
-    df = df.drop_duplicates()
+    # 1. PENYELARASAN DIREKTORI & MEMUAT DATASET
+    # Memastikan skrip berjalan dari folder proyek utama
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(base_dir, "data_raw", "student-lifestyle-and-stress-dataset.csv")
     
-    # 2. Lakukan One-Hot Encoding pada fitur kategorikal teks agar bisa di-scale
-    df_encoded = pd.get_dummies(df, columns=['Student_Type', 'Month'], drop_first=True)
+    if not os.path.exists(data_path):
+        # Fallback jika dijalankan langsung di root tanpa subfolder data_raw
+        data_path = os.path.join(base_dir, "student-lifestyle-and-stress-dataset.csv")
+        
+    print(f"[1/6] Memuat dataset dari: {data_path}")
+    try:
+        df = pd.read_csv(data_path)
+        print(f"      -> Sukses! Ukuran dataset awal: {df.shape[0]} baris, {df.shape[1]} kolom.")
+    except Exception as e:
+        print(f"[ERROR] Gagal memuat dataset. Pesan kesalahan: {e}")
+        return
+
+    # 2. PEMISAHAN FITUR DAN TARGET
+    target_column = 'Stress_Level'
+    if target_column not in df.columns:
+        print(f"[ERROR] Kolom target '{target_column}' tidak ditemukan dalam dataset!")
+        return
+        
+    X = df.drop(columns=[target_column])
+    y = df[target_column]
+
+    # 3. PRAPEMROSESAN DATA & PIPELINE REKAYASA FITUR (PREPROCESSING)
+    print("[2/6] Membangun pipeline prapemrosesan data otomatis...")
     
-    # 3. Pisahkan Fitur (X) dan Target (y) berdasarkan nama kolom yang tepat
-    X = df_encoded.drop(columns=['Stress_Level']) 
-    y = df_encoded['Stress_Level']
+    # Identifikasi kolom numerik dan kategorikal secara dinamis
+    numeric_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
     
-    # 4. Split Dataset terlebih dahulu (Proporsi 80:20)
+    print(f"      -> Fitur Numerik   : {numeric_features}")
+    print(f"      -> Fitur Kategorikal: {categorical_features}")
+
+    # Pipeline untuk fitur numerik: Imputasi Mean + Standard Scaling
+    numeric_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='mean')),
+        ('scaler', StandardScaler())
+    ])
+
+    # Pipeline untuk fitur kategorikal: Imputasi Mode + One-Hot Encoding
+    categorical_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='most_frequent')),
+        ('onehot', OneHotEncoder(handle_unknown='ignore'))
+    ])
+
+    # Menggabungkan preprocessor menggunakan ColumnTransformer
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, numeric_features),
+            ('cat', categorical_transformer, categorical_features)
+        ])
+
+    # 4. DATA SPLITTING & HANDLING CLASS IMBALANCE
+    print("[3/6] Melakukan pembagian data uji (Train-Test Split 80:20)...")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
     
-    # 5. Penskalaan (Scaling) Fitur secara terisolasi untuk mencegah leakage
-    scaler = StandardScaler()
+    print(f"      -> Sebelum Resampling - Distribusi Kelas Train: {dict(pd.Series(y_train).value_counts())}")
     
-    # Fit & Transform hanya pada data training
-    X_train_scaled = pd.DataFrame(scaler.fit_transform(X_train), columns=X_train.columns)
-    # Transform saja pada data testing menggunakan parameter dari data training
-    X_test_scaled = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
+    print("[4/6] Menangani masalah ketidakseimbangan kelas (Downsampling)...")
+    # Karena data awal di-preprocess lewat pipeline, kita transformasikan X_train sementara untuk resampling
+    X_train_transformed = preprocessor.fit_transform(X_train)
+    X_test_transformed = preprocessor.transform(X_test)
     
-    return X_train_scaled, X_test_scaled, y_train, y_test
-
-def handle_imbalanced_data(X_train, y_train):
-    """Melakukan Random Undersampling HANYA pada data training."""
-    print("Melakukan Random Undersampling pada data training...")
+    # Menerapkan Random Under Sampler
     rus = RandomUnderSampler(random_state=42)
-    X_train_resampled, y_train_resampled = rus.fit_resample(X_train, y_train)
-    return X_train_resampled, y_train_resampled
-
-def save_preprocessed_data(X_train, X_test, y_train, y_test, output_dir):
-    """Menyimpan hasil data split dan resampled ke folder tujuan."""
-    os.makedirs(output_dir, exist_ok=True)
+    X_train_resampled, y_train_resampled = rus.fit_resample(X_train_transformed, y_train)
     
-    X_train.to_csv(os.path.join(output_dir, "X_train_ready.csv"), index=False)
-    X_test.to_csv(os.path.join(output_dir, "X_test_ready.csv"), index=False)
-    y_train.to_csv(os.path.join(output_dir, "y_train_ready.csv"), index=False)
-    y_test.to_csv(os.path.join(output_dir, "y_test_ready.csv"), index=False)
-    print(f"Sukses! Seluruh data hasil preprocessing disimpan di: {output_dir}")
+    print(f"      -> Setelah Resampling - Distribusi Kelas Train: {dict(pd.Series(y_train_resampled).value_counts())}")
+
+    # 5. PELATIHAN MODEL (RANDOM FOREST CLASSIFIER)
+    print("[5/6] Melatih model Random Forest Classifier...")
+    model = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
+    model.fit(X_train_resampled, y_train_resampled)
+    print("      -> Model berhasil dilatih.")
+
+    # 6. EVALUASI MODEL SECARA RIGORIS
+    print("[6/6] Mengevaluasi model pada data uji...")
+    y_pred = model.predict(X_test_transformed)
+    
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, average='binary')
+    recall = recall_score(y_test, y_pred, average='binary')
+    f1 = f1_score(y_test, y_pred, average='binary')
+    
+    print("\n" + "="*45)
+    print("         RINGKASAN EVALUASI MODEL          ")
+    print("="*45)
+    print(f" Akurasi  : {accuracy:.4f}")
+    print(f" Precision: {precision:.4f}")
+    print(f" Recall   : {recall:.4f}")
+    print(f" F1-Score : {f1:.4f}")
+    print("="*45)
+    print("\nLaporan Klasifikasi Detail:")
+    print(classification_report(y_test, y_pred))
+
+    # 7. EKSPOR ARTIFAK MODEL AKHIR
+    # Menyimpan model dan objek preprocessor untuk deployment masa depan
+    model_export_path = os.path.join(base_dir, "saved_models")
+    os.makedirs(model_export_path, exist_ok=True)
+    
+    # Mengekspor pipeline preprocessor dan model utama menggunakan Pickle (.pkl)
+    pipeline_file = os.path.join(model_export_path, "final_pipeline_model.pkl")
+    with open(pipeline_file, 'wb') as f:
+        pickle.dump({'preprocessor': preprocessor, 'model': model}, f)
+        
+    print(f"\n[SUKSES] Seluruh pipeline otomatis selesai dijalankan!")
+    print(f"[SUKSES] Model akhir dan konfigurasi pipeline berhasil diekspor ke: {pipeline_file}")
+    print("="*60)
 
 if __name__ == "__main__":
-    # Menggunakan Absolute Path agar aman dijalankan dari direktori terminal mana pun
-    RAW_DATA_PATH = r"C:\Users\LENOVO\Documents\MSML\Eksperimen_SML_Rifdan\data_raw\student-lifestyle-and-stress-dataset.csv"
-    OUTPUT_DIR = r"C:\Users\LENOVO\Documents\MSML\Eksperimen_SML_Rifdan\preprocessing\student_preprocessing"
-    
-    print("=== Memulai Pipeline Otomatisasi Preprocessing ===")
-    
-    # 1. Load Data
-    raw_df = load_data(RAW_DATA_PATH)
-    
-    # 2. Preprocess, One-Hot Encode, Split, dan Scale (Aman dari Leakage & ValueError)
-    X_train, X_test, y_train, y_test = preprocess_and_split(raw_df)
-    
-    # 3. Handle Imbalanced Data HANYA pada Data Train
-    X_train_res, y_train_res = handle_imbalanced_data(X_train, y_train)
-    
-    # 4. Simpan Hasil Akhir yang Siap Dilatih ke Folder Target
-    save_preprocessed_data(X_train_res, X_test, y_train_res, y_test, OUTPUT_DIR)
-    
-    print("=== Pipeline Selesai Terbaca Tanpa Error ===")
+    run_automation_pipeline()
